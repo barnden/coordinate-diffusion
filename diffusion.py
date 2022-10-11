@@ -7,7 +7,6 @@ from torchvision.utils import make_grid
 import matplotlib.pyplot as plt
 import os
 
-import numpy as np
 
 def generate_constants(steps, initial=1e-4, final=2e-2):
     """
@@ -75,13 +74,15 @@ class MLP(nn.Module):
 
         self.stack = nn.Sequential(
             # |<t, x, y, x_0(R), x_0(G), x_0(B), noise(R), noise(G), noise(B)>| = 9
-            nn.Linear(9, 256),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(256, 256),
-            nn.ReLU(),
-            nn.Dropout(0.2),
-            nn.Linear(256, 3)
+            nn.Linear(9, 128),
+            nn.Sigmoid(),
+            nn.Linear(128, 64),
+            nn.Sigmoid(),
+            nn.Linear(64, 64),
+            nn.Sigmoid(),
+            nn.Linear(64, 128),
+            nn.Sigmoid(),
+            nn.Linear(128, 3),
         )
 
     def forward(self, x):
