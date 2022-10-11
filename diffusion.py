@@ -247,7 +247,11 @@ def denoise(x, t):
     ivec = torch.cat((t_hat, I_hat, sampled_x_t, sampled_N), dim=1).to(device)
 
     E_theta = model(ivec)
-    E_theta = E_theta.reshape((3, image_size, image_size)).detach().cpu()
+    E_theta = E_theta.detach().cpu()
+    E_theta = E_theta.reshape((x.shape[0], image_size * image_size, x.shape[1]))
+    E_theta = E_theta.transpose(1, -1)
+    E_theta = E_theta.reshape((x.shape[0], x.shape[1], image_size, image_size))
+
     mu_theta = (x - beta_t * E_theta / sqrt_one_minus_alpha_bar_t) / alpha_sqrt_t
 
     if t == 0:
@@ -308,13 +312,8 @@ if __name__ == "__main__":
                 image = torch.squeeze(image)
                 images.append(image)
 
-                # img = image.permute(1, 2, 0).numpy()
-                # print(np.min(img), np.max(img))
-                # plt.imsave(f"img-{idx}.png", img)
-
-        grid = make_grid(images, nrow=10, normalize=True)
+        grid = make_grid(images, nrow=10, normalize=True, value_range=(-1, 1))
         grid = grid.permute(1, 2, 0).numpy()
 
         plt.imshow(grid)
         plt.show()
-
