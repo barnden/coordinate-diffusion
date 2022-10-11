@@ -142,7 +142,7 @@ def Loss(model, x_0, t, I):
     sampled_E = sampler(E, I)
 
     # Apply Gaussian blur onto x_0 and sample
-    noise = transforms.GaussianBlur(5, 1.20)(x_0)
+    noise = transforms.GaussianBlur(*gaussian_blur)(x_0)
     sampled_N = sampler(noise, I).to(device)
 
     # Normalise I to [-1, 1]
@@ -231,7 +231,7 @@ def denoise(x, t):
     sampled_x_t = sampler(x, I)
 
     # Apply Gaussian blur onto x_0 and sample
-    noise = transforms.GaussianBlur(5, 1.20)(x)
+    noise = transforms.GaussianBlur(*gaussian_blur)(x)
     sampled_N = sampler(noise, I)
 
     # Normalise I to [-1, 1]
@@ -266,6 +266,7 @@ if __name__ == "__main__":
     image_samples = 128 * 128
     steps = 1000
     epochs = 100
+    gaussian_blur = (9, 1.5)  # kernel size, stdev
 
     assert image_samples <= image_size * image_size
 
