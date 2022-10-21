@@ -72,9 +72,10 @@ class MLP(nn.Module):
     def __init__(self):
         super().__init__()
 
+        inputs = 6 + 3 * len(kernels)
+
         self.stack = nn.Sequential(
-            # |<t, x, y, x_0(R), x_0(G), x_0(B), noise(R), noise(G), noise(B)>| = 9
-            nn.Linear(9, 128),
+            nn.Linear(inputs, 128),
             nn.Sigmoid(),
             nn.Linear(128, 64),
             nn.Sigmoid(),
@@ -142,8 +143,8 @@ def Loss(model, x_0, t, I):
     sampled_E = sampler(E, I)
 
     # Apply Gaussian blur onto x_0 and sample
-    noise = transforms.GaussianBlur(*gaussian_blur)(x_0)
-    sampled_N = sampler(noise, I).to(device)
+    noise = [transforms.GaussianBlur(*kernel)(x_0) for kernel in kernels]
+    sampled_noise = [sampler(N, I).to(device) for N in noise]
 
     # Normalise I to [-1, 1]
     I = (2.0 * I - image_size) / image_size
@@ -151,10 +152,9 @@ def Loss(model, x_0, t, I):
     # Normalise t to [-1, 1]
     t = (2.0 * t - steps) / steps
 
-    # Let ivec := <t, norm(x), norm(y), x_0(R), x_0(G), x_0(B), noise(R), noise(G), noise(B)>
     I = I.permute((1, 0)).repeat(batch_size, 1)
     t = t[:, None].repeat(image_samples, 1)
-    ivec = torch.cat((t, I, sampled_x_t, sampled_N), dim=1)
+    ivec = torch.cat((t, I, sampled_x_t, *sampled_noise), dim=1)
 
     # Predict E given ivec
     predicted_E = model(ivec)
@@ -167,7 +167,7 @@ def save_model():
 
 
 def train(train, validate):
-    optimizer = optim.Adam(model.parameters(), lr=1e-4)
+    optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
     for epoch in range(epochs):
         print("-" * 32)
@@ -177,6 +177,7 @@ def train(train, validate):
         for step, (x_0, _) in enumerate(train):
             optimizer.zero_grad()
 
+            x_0 = x_0.float()
             I = torch.randint(0, image_size, (2, image_samples), device=device)
             t = torch.randint(0, steps, (batch_size,), device=device).long()
 
@@ -202,7 +203,7 @@ def validate_model(loader):
     for (x_0, _) in loader:
         I = torch.randint(0, image_size, (2, image_samples), device=device)
         t = torch.randint(0, steps, (batch_size,), device=device).long()
-        x_0 = x_0.to(device)
+        x_0 = x_0.float().to(device)
 
         total_loss += Loss(model, x_0, t, I).item()
 
@@ -231,8 +232,8 @@ def denoise(x, t):
     sampled_x_t = sampler(x, I)
 
     # Apply Gaussian blur onto x_0 and sample
-    noise = transforms.GaussianBlur(*gaussian_blur)(x)
-    sampled_N = sampler(noise, I)
+    noise = [transforms.GaussianBlur(*kernel)(x) for kernel in kernels]
+    sampled_noise = [sampler(N, I) for N in noise]
 
     # Normalise I to [-1, 1]
     I_hat = (2.0 * I - image_size) / image_size
@@ -240,11 +241,10 @@ def denoise(x, t):
     # Normalise t to [-1, 1]
     t_hat = (2.0 * t - steps) / steps
 
-    # Let ivec := <t, norm(x), norm(y), x_0(R), x_0(G), x_0(B), noise(R), noise(G), noise(B)>
     I_hat = I_hat.permute((1, 0))
     t_hat = t_hat[:, None].repeat(image_size * image_size, 1)
 
-    ivec = torch.cat((t_hat, I_hat, sampled_x_t, sampled_N), dim=1).to(device)
+    ivec = torch.cat((t_hat, I_hat, sampled_x_t, *sampled_noise), dim=1).to(device)
 
     E_theta = model(ivec)
     E_theta = E_theta.detach().cpu()
@@ -267,10 +267,11 @@ def denoise(x, t):
 if __name__ == "__main__":
     batch_size = 64
     image_size = 128
-    image_samples = 128 * 128
+    image_samples = 8192
     steps = 1000
     epochs = 100
-    gaussian_blur = (9, 1.5)  # kernel size, stdev
+    learning_rate = 1e-2
+    kernels = ((3, 0.5), (9, 1.5), (27, 4.5), (81, 13.5))
 
     assert image_samples <= image_size * image_size
 
@@ -294,26 +295,36 @@ if __name__ == "__main__":
         (trainloader, validloader, testloader) = create_dataloader(
             (image_size, image_size), batch_size
         )
-
         train(trainloader, validloader)
     else:
-        image = torch.randn((3, image_size, image_size))
-        step = steps // 10
-        x = image[None, ...]
+        with torch.no_grad():
+            image = torch.randn((3, image_size, image_size))
+            # image = next(iter(trainloader))[0][0]
+            image = torch.squeeze(image)
 
-        images = []
+            step = steps // 10
+            x = image[None, ...]
+            images = []
+            # images = [torch.squeeze(x.cpu())]
 
-        for idx in reversed(range(steps)):
-            t = torch.tensor([idx]).long().cpu()
-            x = denoise(x, t)
+            # for idx in range(steps, step):
+            # t = torch.tensor([idx]).long().cpu()
+            # x, E = forward(x, t)
 
-            if idx % step == 0:
-                image = x.detach().cpu()
-                image = torch.squeeze(image)
-                images.append(image)
+            # image = torch.squeeze(x.detach().cpu())
+            # images.append(image)
 
-        grid = make_grid(images, nrow=10, normalize=True, value_range=(-1, 1))
-        grid = grid.permute(1, 2, 0).numpy()
+            for idx in reversed(range(steps)):
+                t = torch.tensor([idx]).long().cpu()
+                x = denoise(x.cpu(), t)
 
-        plt.imshow(grid)
+                if idx % step == 0:
+                    image = x.detach().cpu()
+                    image = torch.squeeze(image)
+                    images.append(image)
+
+            grid = make_grid(images, nrow=10, normalize=True, value_range=(-1, 1))
+            grid = grid.permute(1, 2, 0).numpy()
+
+            plt.imshow(grid)
         plt.show()
